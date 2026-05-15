@@ -35,7 +35,11 @@ class Settings(BaseSettings):
     # Facenet512 + ArcFace ensemble (1024-d concat) with TTA (horizontal flip
     # average per model). Typical +2-4pp accuracy lift vs Facenet512 alone.
     # After changing this, run scripts/reembed.py on the server.
-    EMBEDDING_MODELS: List[str] = ["Facenet512", "ArcFace"]
+    # Facenet512 alone + TTA. DeepFace's ArcFace is a lighter model than the
+    # SOTA InsightFace ArcFace; combining it with Facenet512 in DeepFace was
+    # measurably worse, not better, despite the higher dimension. Phase D
+    # (real `insightface` library) is the right place to add a second model.
+    EMBEDDING_MODELS: List[str] = ["Facenet512"]
     USE_TTA: bool = True
     # Facenet512 cosine-distance threshold for "same person" is ~0.30
     # (cosine similarity > 0.70). Looser values merge different people.

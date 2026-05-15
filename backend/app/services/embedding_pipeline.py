@@ -156,7 +156,13 @@ class EmbeddingPipeline:
                 # FAISS index (different length than expected dimension).
                 continue
 
-            combined = np.concatenate(per_model_vectors).astype(np.float32)
+            # Per-model L2 normalization BEFORE concatenation. Without this,
+            # the model with larger raw vector magnitudes dominates the
+            # combined embedding — defeating the ensemble. With it, the
+            # combined cosine similarity equals the average of the per-model
+            # cosine similarities, which is what we actually want.
+            normalized_parts = [self._l2_normalize(v) for v in per_model_vectors]
+            combined = np.concatenate(normalized_parts).astype(np.float32)
             combined = self._l2_normalize(combined)
 
             results.append({
@@ -186,7 +192,9 @@ class EmbeddingPipeline:
                 tta_emb = _embed_with_model(flipped, model_name, align=False)
                 if tta_emb is not None:
                     vec = (vec + np.array(tta_emb, dtype=np.float32)) / 2.0
-            per_model_vectors.append(vec)
+            # Per-model L2 normalization so each model contributes equally
+            # to the concatenated vector (see detect_and_embed for rationale).
+            per_model_vectors.append(self._l2_normalize(vec))
         combined = np.concatenate(per_model_vectors).astype(np.float32)
         return self._l2_normalize(combined)
 
