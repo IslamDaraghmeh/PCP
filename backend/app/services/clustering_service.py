@@ -60,6 +60,11 @@ class ClusteringService:
 
         labels = clustering.labels_
 
+        # Snapshot current face → person mapping so we can restore person_id
+        # on the new clusters when re-clustering (face.person_id is preserved;
+        # cluster.person_id needs to be re-derived).
+        face_person_map = {f.id: f.person_id for f in faces}
+
         # Clear existing clusters
         db.query(Cluster).delete()
 
@@ -83,10 +88,20 @@ class ClusteringService:
             cluster_face_indices = np.where(labels == label)[0]
             cluster_face_ids = [face_ids[i] for i in cluster_face_indices]
 
+            # Inherit person_id only when every labeled face agrees on one
+            # person. Mixed labels → leave unassigned so the user re-confirms.
+            labeled_persons = {
+                face_person_map.get(fid)
+                for fid in cluster_face_ids
+                if face_person_map.get(fid) is not None
+            }
+            inherited_person_id = labeled_persons.pop() if len(labeled_persons) == 1 else None
+
             # Create cluster
             cluster = Cluster(
                 name=f"Cluster {label + 1}",
-                face_count=len(cluster_face_ids)
+                face_count=len(cluster_face_ids),
+                person_id=inherited_person_id,
             )
             db.add(cluster)
             db.flush()
