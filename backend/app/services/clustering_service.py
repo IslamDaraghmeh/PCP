@@ -78,19 +78,19 @@ class ClusteringService:
             face.cluster_id = None
         db.commit()
 
-        # Create new clusters
-        unique_labels = set(labels)
-        clusters_created = 0
-        noise_count = 0
-
+        # Build cluster groups: density-based clusters + singletons for noise.
+        # Every face must end up in some cluster so the UI can show and label it.
+        groups: List[List[int]] = []
+        unique_labels = sorted(l for l in set(labels) if l != -1)
         for label in unique_labels:
-            if label == -1:
-                # Noise points
-                noise_count = np.sum(labels == label)
-                continue
+            groups.append(list(np.where(labels == label)[0]))
+        # One singleton group per noise face
+        noise_indices = list(np.where(labels == -1)[0])
+        for idx in noise_indices:
+            groups.append([idx])
 
-            # Get faces in this cluster
-            cluster_face_indices = np.where(labels == label)[0]
+        clusters_created = 0
+        for group_num, cluster_face_indices in enumerate(groups, start=1):
             cluster_face_ids = [face_ids[i] for i in cluster_face_indices]
 
             # Inherit person_id only when every labeled face agrees on one
@@ -102,20 +102,22 @@ class ClusteringService:
             }
             inherited_person_id = labeled_persons.pop() if len(labeled_persons) == 1 else None
 
-            # Create cluster
             cluster = Cluster(
-                name=f"Cluster {label + 1}",
+                name=f"Cluster {group_num}",
                 face_count=len(cluster_face_ids),
                 person_id=inherited_person_id,
             )
             db.add(cluster)
             db.flush()
 
-            # Find representative face (closest to centroid)
+            # Find representative face (closest to centroid); singletons have one face
             cluster_embeddings = embeddings[cluster_face_indices]
-            centroid = np.mean(cluster_embeddings, axis=0)
-            distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
-            representative_idx = cluster_face_indices[np.argmin(distances)]
+            if len(cluster_face_indices) == 1:
+                representative_idx = cluster_face_indices[0]
+            else:
+                centroid = np.mean(cluster_embeddings, axis=0)
+                distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
+                representative_idx = cluster_face_indices[np.argmin(distances)]
             cluster.representative_face_id = face_ids[representative_idx]
 
             # Update faces with cluster assignment
@@ -125,6 +127,9 @@ class ClusteringService:
                     face.cluster_id = cluster.id
 
             clusters_created += 1
+
+        # Now every face is in a cluster; report 0 noise faces.
+        noise_count = 0
 
         db.commit()
 
