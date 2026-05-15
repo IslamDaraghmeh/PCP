@@ -91,14 +91,33 @@ class VectorService:
     def remove_embedding(self, face_id: int):
         """
         Remove an embedding from the index.
-        Note: FAISS IndexFlatIP doesn't support removal, so we rebuild the index.
+
+        IndexFlatIP has no in-place delete, so we reconstruct the surviving
+        embeddings and rebuild the index. The previous implementation only
+        popped from id_map, leaving the FAISS positions unchanged — which
+        silently corrupted the position↔face_id mapping after every delete.
         """
-        if face_id in self.id_map:
-            idx = self.id_map.index(face_id)
-            self.id_map.pop(idx)
-            # For now, we can't efficiently remove from IndexFlatIP
-            # In production, use IndexIDMap or rebuild periodically
+        if face_id not in self.id_map:
+            return
+
+        if self.index.ntotal == 0:
+            self.id_map = []
             self._save_index()
+            return
+
+        all_embeddings = self.index.reconstruct_n(0, self.index.ntotal)
+        keep_mask = [fid != face_id for fid in self.id_map]
+        kept_ids = [fid for fid, keep in zip(self.id_map, keep_mask) if keep]
+        kept_embeddings = all_embeddings[keep_mask] if any(keep_mask) else np.empty(
+            (0, self.dimension), dtype=np.float32
+        )
+
+        self._create_new_index()
+        if len(kept_ids) > 0:
+            # Embeddings are already L2-normalized in the index; add directly.
+            self.index.add(kept_embeddings)
+            self.id_map = kept_ids
+        self._save_index()
 
     def rebuild_index(self, face_ids: List[int], embeddings: np.ndarray):
         """Rebuild the entire index with new data."""
