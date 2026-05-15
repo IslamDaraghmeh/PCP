@@ -41,10 +41,11 @@ class Settings(BaseSettings):
     # (real `insightface` library) is the right place to add a second model.
     EMBEDDING_MODELS: List[str] = ["Facenet512"]
     USE_TTA: bool = True
-    # Facenet512 cosine-distance threshold for "same person" is ~0.30
-    # (cosine similarity > 0.70). Looser values merge different people.
-    SIMILARITY_THRESHOLD: float = 0.70
-    CLUSTERING_EPS: float = 0.30
+    # Baseline thresholds matching the Facenet512+TTA distribution measured by
+    # scripts/evaluate_thresholds.py on the production data set. These mirror
+    # the "balanced" preset above.
+    SIMILARITY_THRESHOLD: float = 0.40
+    CLUSTERING_EPS: float = 0.55
     CLUSTERING_MIN_SAMPLES: int = 2
 
     class Config:
@@ -56,8 +57,14 @@ settings = Settings()
 # User-facing strictness presets for /clusters/run and /faces/search.
 # Each request can pick a preset instead of remembering raw threshold values.
 # Keep keys lowercase; the API validates against this dict's keys.
+# Tuned for the Facenet512 + TTA pipeline. The TTA averaging compresses
+# embedding magnitudes so same-person cosine similarity now spans 0.50–1.00
+# instead of the 0.70–1.00 range raw Facenet512 produced. Different-person
+# similarities still top out around 0.27 — so we keep a wide safety margin
+# even with these looser thresholds. Re-tune after every EMBEDDING_MODELS /
+# USE_TTA change by running scripts/evaluate_thresholds.
 STRICTNESS_PRESETS = {
-    "strict":   {"eps": 0.25, "similarity_threshold": 0.78},
-    "balanced": {"eps": 0.30, "similarity_threshold": 0.70},
-    "loose":    {"eps": 0.35, "similarity_threshold": 0.62},
+    "strict":   {"eps": 0.45, "similarity_threshold": 0.55},
+    "balanced": {"eps": 0.55, "similarity_threshold": 0.40},
+    "loose":    {"eps": 0.65, "similarity_threshold": 0.30},
 }
