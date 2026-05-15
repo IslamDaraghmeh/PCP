@@ -68,6 +68,20 @@ const Clusters = () => {
     }
   };
 
+  const handleToggleFaces = async (cluster) => {
+    if (selectedCluster?.id === cluster.id) {
+      setSelectedCluster(null);
+      return;
+    }
+    try {
+      const res = await clustersAPI.get(cluster.id);
+      setSelectedCluster(res.data);
+    } catch (error) {
+      console.error('Error fetching cluster faces:', error);
+      setSelectedCluster(cluster);
+    }
+  };
+
   const getFaceImageUrl = (path) => {
     if (!path) return null;
     const filename = path.split('/').pop().split('\\').pop();
@@ -194,9 +208,7 @@ const Clusters = () => {
                 {/* View Details Button */}
                 <div className="p-3 sm:p-4 border-t">
                   <button
-                    onClick={() => setSelectedCluster(
-                      selectedCluster?.id === cluster.id ? null : cluster
-                    )}
+                    onClick={() => handleToggleFaces(cluster)}
                     className="w-full py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition text-sm font-medium"
                   >
                     {selectedCluster?.id === cluster.id ? t('clusters.hideFaces') : t('clusters.viewFaces')}
@@ -204,28 +216,29 @@ const Clusters = () => {
                 </div>
 
                 {/* Expanded Faces */}
-                {selectedCluster?.id === cluster.id && cluster.faces && (
+                {selectedCluster?.id === cluster.id && selectedCluster.faces && (
                   <div className="p-3 sm:p-4 border-t bg-gray-50">
                     <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                      {cluster.faces.slice(0, 8).map((face, index) => (
+                      {selectedCluster.faces.map((face, index) => (
                         <div
                           key={face.id}
                           className="aspect-square rounded-lg overflow-hidden bg-gray-200 cursor-pointer hover:ring-2 hover:ring-blue-500 transition"
-                          onClick={() => openFaceModal(cluster, index)}
+                          onClick={() => openFaceModal(selectedCluster, index)}
                         >
-                          <img
-                            src={getFaceImageUrl(face.face_image_path)}
-                            alt={`Face ${face.id}`}
-                            className="w-full h-full object-cover"
-                          />
+                          {face.face_image_path ? (
+                            <img
+                              src={getFaceImageUrl(face.face_image_path)}
+                              alt={`Face ${face.id}`}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+                              N/A
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
-                    {cluster.faces.length > 8 && (
-                      <p className="text-xs sm:text-sm text-gray-500 mt-2 text-center">
-                        {t('clusters.moreFaces', { count: cluster.faces.length - 8 })}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
