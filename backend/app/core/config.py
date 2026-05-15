@@ -26,8 +26,10 @@ class Settings(BaseSettings):
     # Face Recognition settings
     FACE_MODEL: str = "Facenet512"
     DETECTOR_BACKEND: str = "retinaface"
-    SIMILARITY_THRESHOLD: float = 0.6
-    CLUSTERING_EPS: float = 0.5
+    # Facenet512 cosine-distance threshold for "same person" is ~0.30
+    # (cosine similarity > 0.70). Looser values merge different people.
+    SIMILARITY_THRESHOLD: float = 0.70
+    CLUSTERING_EPS: float = 0.30
     CLUSTERING_MIN_SAMPLES: int = 2
 
     class Config:
