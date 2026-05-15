@@ -64,28 +64,35 @@ class VectorService:
     def search(self, query_embedding: np.ndarray, k: int = 10, threshold: float = None) -> List[Tuple[int, float]]:
         """
         Search for similar faces.
-        Returns list of (face_id, similarity_score) tuples.
+        Returns list of (face_id, similarity_score) tuples sorted by similarity desc.
         """
         if self.index.ntotal == 0:
             return []
 
-        threshold = threshold or settings.SIMILARITY_THRESHOLD
+        threshold = threshold if threshold is not None else settings.SIMILARITY_THRESHOLD
 
         # Normalize query
         query = query_embedding.astype(np.float32).reshape(1, -1)
         faiss.normalize_L2(query)
 
-        # Search
-        k = min(k, self.index.ntotal)
-        distances, indices = self.index.search(query, k)
+        # Pull more candidates than the caller asked for, then threshold-filter.
+        # FAISS top-k by score already gives the best matches, but if the caller
+        # later dedupes by image/person, a tight k can drop valid matches before
+        # the dedupe step ever sees them. Over-fetching here is cheap (FlatIP).
+        search_k = min(max(k * 5, 50), self.index.ntotal)
+        distances, indices = self.index.search(query, search_k)
 
         results = []
         for dist, idx in zip(distances[0], indices[0]):
-            if idx >= 0 and idx < len(self.id_map):
-                similarity = float(dist)  # Already cosine similarity due to IP
-                if similarity >= threshold:
-                    results.append((self.id_map[idx], similarity))
+            if idx < 0 or idx >= len(self.id_map):
+                continue
+            similarity = float(dist)  # Already cosine similarity due to IP
+            if similarity >= threshold:
+                results.append((self.id_map[idx], similarity))
 
+        # FAISS already returns in score order, but be explicit so downstream
+        # dedupe code can rely on it.
+        results.sort(key=lambda r: r[1], reverse=True)
         return results
 
     def remove_embedding(self, face_id: int):

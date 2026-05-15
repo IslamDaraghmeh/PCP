@@ -74,45 +74,63 @@ async def search_faces(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # Detect faces in query image
-        detected_faces = face_service.detect_faces(temp_path)
+        # Pick the best face in the query (largest area × confidence). Using
+        # the *first* detected face was wrong whenever the subject of interest
+        # wasn't the leftmost person in the frame.
+        best_face = face_service.get_best_query_face(temp_path)
 
-        if not detected_faces:
+        if best_face is None:
             return FaceSearchResponse(
                 query_faces_detected=0,
                 results=[],
                 total_matches=0
             )
 
-        # Use first detected face for search
-        query_embedding = detected_faces[0]["embedding"]
+        query_embedding = best_face["embedding"]
 
-        # Search in vector index
+        # Over-fetch so the per-image dedupe below has room to collapse
+        # duplicates without losing distinct people.
         search_results = vector_service.search(
-            query_embedding, k=limit, threshold=threshold
+            query_embedding, k=limit * 4, threshold=threshold
         )
 
-        results = []
+        # Collapse multiple matches from the same source image into the single
+        # best-scoring face. Stops the result list filling with near-duplicate
+        # crops of the same person from one photo.
+        best_per_image: dict[int, tuple[int, float]] = {}
         for face_id, similarity in search_results:
             face = db.query(Face).filter(Face.id == face_id).first()
-            if face:
-                image = db.query(Image).filter(Image.id == face.image_id).first()
-                person = None
-                if face.person_id:
-                    person = db.query(Person).filter(Person.id == face.person_id).first()
+            if not face:
+                continue
+            existing = best_per_image.get(face.image_id)
+            if existing is None or similarity > existing[1]:
+                best_per_image[face.image_id] = (face_id, similarity)
 
-                results.append(FaceSearchResult(
-                    face_id=face.id,
-                    image_id=face.image_id,
-                    person_id=face.person_id,
-                    person_name=person.name if person else None,
-                    similarity_score=round(similarity, 4),
-                    face_image_path=face.face_image_path,
-                    source_image_path=image.file_path if image else None
-                ))
+        # Order by similarity desc and cap at the caller's limit.
+        ordered = sorted(best_per_image.values(), key=lambda r: r[1], reverse=True)[:limit]
+
+        results = []
+        for face_id, similarity in ordered:
+            face = db.query(Face).filter(Face.id == face_id).first()
+            if not face:
+                continue
+            image = db.query(Image).filter(Image.id == face.image_id).first()
+            person = None
+            if face.person_id:
+                person = db.query(Person).filter(Person.id == face.person_id).first()
+
+            results.append(FaceSearchResult(
+                face_id=face.id,
+                image_id=face.image_id,
+                person_id=face.person_id,
+                person_name=person.name if person else None,
+                similarity_score=round(similarity, 4),
+                face_image_path=face.face_image_path,
+                source_image_path=image.file_path if image else None
+            ))
 
         return FaceSearchResponse(
-            query_faces_detected=len(detected_faces),
+            query_faces_detected=1,
             results=results,
             total_matches=len(results)
         )
