@@ -73,6 +73,11 @@ class FaceService:
 
             face_crop = img.crop((x1, y1, x2, y2))
 
+            # PNGs (and similar) need RGB conversion before JPEG save — otherwise
+            # alpha/palette modes raise and the face record ends up with no thumbnail.
+            if face_crop.mode not in ("RGB", "L"):
+                face_crop = face_crop.convert("RGB")
+
             # Generate unique filename
             face_filename = f"{uuid.uuid4().hex}.jpg"
             face_path = os.path.join(self.faces_dir, face_filename)
