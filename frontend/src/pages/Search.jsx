@@ -12,7 +12,7 @@ const Search = () => {
   const [preview, setPreview] = useState(null);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState(null);
-  const [threshold, setThreshold] = useState(0.6);
+  const [threshold, setThreshold] = useState(0.7);
   const [dragActive, setDragActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [modalImage, setModalImage] = useState(null);
@@ -174,8 +174,8 @@ const Search = () => {
               </label>
               <input
                 type="range"
-                min="0.3"
-                max="0.9"
+                min="0.5"
+                max="0.95"
                 step="0.05"
                 value={threshold}
                 onChange={(e) => setThreshold(parseFloat(e.target.value))}
