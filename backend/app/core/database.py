@@ -27,7 +27,7 @@ def get_db():
 
 
 def init_db():
-    from app.models import user, image, face, person, cluster, audit_log
+    from app.models import user, image, face, person, cluster, audit_log, face_negative_link
     from app.models.user import User, UserRole
     from app.core.security import get_password_hash
 

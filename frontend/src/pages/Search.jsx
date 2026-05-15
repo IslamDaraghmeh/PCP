@@ -2,17 +2,27 @@ import React, { useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import CameraCapture from '../components/CameraCapture';
 import ImageModal from '../components/ImageModal';
+import StrictnessToggle from '../components/StrictnessToggle';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '../context/LanguageContext';
 import { facesAPI } from '../services/api';
 import { Search as SearchIcon, Upload, User, Image, Camera } from 'lucide-react';
+
+const STRICTNESS_KEY = 'pcp.search.strictness';
 
 const Search = () => {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState(null);
-  const [threshold, setThreshold] = useState(0.7);
+  const [strictness, setStrictness] = useState(() => {
+    return localStorage.getItem(STRICTNESS_KEY) || 'balanced';
+  });
+
+  const updateStrictness = (val) => {
+    setStrictness(val);
+    localStorage.setItem(STRICTNESS_KEY, val);
+  };
   const [dragActive, setDragActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [modalImage, setModalImage] = useState(null);
@@ -65,7 +75,7 @@ const Search = () => {
     setResults(null);
 
     try {
-      const res = await facesAPI.search(file, 20, threshold);
+      const res = await facesAPI.search(file, 20, null, strictness);
       setResults(res.data);
     } catch (error) {
       console.error('Search error:', error);
@@ -169,22 +179,11 @@ const Search = () => {
 
             {/* Search Settings */}
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('search.similarityThreshold')}: {threshold}
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="0.95"
-                step="0.05"
-                value={threshold}
-                onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                className="w-full"
+              <StrictnessToggle
+                value={strictness}
+                onChange={updateStrictness}
+                disabled={searching}
               />
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>{t('search.moreResults')}</span>
-                <span>{t('search.moreAccurate')}</span>
-              </div>
             </div>
 
             <button

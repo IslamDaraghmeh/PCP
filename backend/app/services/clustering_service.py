@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import Face, Cluster
+from app.models.face_negative_link import FaceNegativeLink
 from app.services.face_service import face_service
+
+# Cosine distance value used to forbid merging two faces. HDBSCAN's
+# cluster_selection_epsilon and any reasonable similarity threshold are well
+# below 1.0, so faces with this distance are guaranteed not to be grouped.
+_FORBIDDEN_DISTANCE = 2.0
 
 
 class ClusteringService:
@@ -13,11 +19,15 @@ class ClusteringService:
         self.eps = settings.CLUSTERING_EPS
         self.min_samples = settings.CLUSTERING_MIN_SAMPLES
 
-    def cluster_faces(self, db: Session) -> Dict:
+    def cluster_faces(self, db: Session, eps: float = None) -> Dict:
         """
-        Perform DBSCAN clustering on all faces in the database.
+        Perform HDBSCAN clustering on all faces in the database.
+        Caller may pass an eps override (per-request strictness preset);
+        falls back to the configured default.
         Returns clustering statistics.
         """
+        effective_eps = eps if eps is not None else self.eps
+
         # Get all faces with embeddings
         faces = db.query(Face).filter(Face.embedding.isnot(None)).all()
 
@@ -51,6 +61,20 @@ class ClusteringService:
         distance_matrix = 1 - similarity_matrix
         distance_matrix = np.clip(distance_matrix, 0, 2).astype(np.float64)
 
+        # Apply user-asserted negative links: force the distance between
+        # disallowed pairs to a value well above any merge threshold, so
+        # HDBSCAN cannot put them in the same cluster regardless of how
+        # similar their embeddings happen to be.
+        face_id_to_idx = {fid: i for i, fid in enumerate(face_ids)}
+        negative_links = db.query(FaceNegativeLink).all()
+        for link in negative_links:
+            ia = face_id_to_idx.get(link.face_a_id)
+            ib = face_id_to_idx.get(link.face_b_id)
+            if ia is None or ib is None:
+                continue
+            distance_matrix[ia, ib] = _FORBIDDEN_DISTANCE
+            distance_matrix[ib, ia] = _FORBIDDEN_DISTANCE
+
         # HDBSCAN auto-adapts density per cluster — better than DBSCAN's single
         # global eps when different people have different intra-class spread.
         # cluster_selection_epsilon enforces a minimum cosine-distance gap so
@@ -60,7 +84,7 @@ class ClusteringService:
             min_samples=1,
             metric='precomputed',
             cluster_selection_method='leaf',
-            cluster_selection_epsilon=self.eps,
+            cluster_selection_epsilon=effective_eps,
             allow_single_cluster=False,
         )
         labels = clusterer.fit_predict(distance_matrix)

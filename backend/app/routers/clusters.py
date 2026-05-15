@@ -1,7 +1,8 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.config import STRICTNESS_PRESETS
 from app.core.database import get_db
 from app.models import Cluster, Face, Person, User, UserRole
 from app.schemas import (
@@ -16,14 +17,25 @@ router = APIRouter(prefix="/clusters", tags=["Clusters"])
 
 @router.post("/run", response_model=ClusteringResult)
 def run_clustering(
+    strictness: str = Query(
+        "balanced",
+        pattern="^(strict|balanced|loose)$",
+        description="Clustering strictness preset",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.ANALYST]))
 ):
     """
     Run face clustering on all faces in the database.
     Requires ADMIN or ANALYST role.
+
+    `strictness` controls how tightly faces are grouped:
+      - strict   → smaller, purer clusters (more singletons)
+      - balanced → default
+      - loose    → bigger groups, more false-merges
     """
-    result = clustering_service.cluster_faces(db)
+    eps = STRICTNESS_PRESETS[strictness]["eps"]
+    result = clustering_service.cluster_faces(db, eps=eps)
     return ClusteringResult(**result)
 
 

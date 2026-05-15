@@ -5,7 +5,8 @@ from app.schemas.image import (
     ImageBase, ImageCreate, ImageResponse, ImageUploadResponse, BulkUploadResponse
 )
 from app.schemas.face import (
-    FaceBase, FaceResponse, FaceSearchResult, FaceSearchResponse
+    FaceBase, FaceResponse, FaceSearchResult, FaceSearchResponse,
+    FaceNegativeLinkResponse, FaceConflictsResponse,
 )
 from app.schemas.person import (
     PersonBase, PersonCreate, PersonUpdate, PersonResponse, PersonWithFaces
@@ -19,6 +20,7 @@ __all__ = [
     "UserBase", "UserCreate", "UserUpdate", "UserResponse", "Token", "TokenData",
     "ImageBase", "ImageCreate", "ImageResponse", "ImageUploadResponse", "BulkUploadResponse",
     "FaceBase", "FaceResponse", "FaceSearchResult", "FaceSearchResponse",
+    "FaceNegativeLinkResponse", "FaceConflictsResponse",
     "PersonBase", "PersonCreate", "PersonUpdate", "PersonResponse", "PersonWithFaces",
     "ClusterBase", "ClusterCreate", "ClusterUpdate", "ClusterResponse",
     "ClusterWithFaces", "ClusteringResult"

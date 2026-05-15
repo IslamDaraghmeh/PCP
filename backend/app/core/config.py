@@ -36,3 +36,13 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 settings = Settings()
+
+
+# User-facing strictness presets for /clusters/run and /faces/search.
+# Each request can pick a preset instead of remembering raw threshold values.
+# Keep keys lowercase; the API validates against this dict's keys.
+STRICTNESS_PRESETS = {
+    "strict":   {"eps": 0.25, "similarity_threshold": 0.78},
+    "balanced": {"eps": 0.30, "similarity_threshold": 0.70},
+    "loose":    {"eps": 0.35, "similarity_threshold": 0.62},
+}

@@ -38,3 +38,18 @@ class FaceSearchResponse(BaseModel):
     query_faces_detected: int
     results: List[FaceSearchResult]
     total_matches: int
+
+
+class FaceNegativeLinkResponse(BaseModel):
+    id: int
+    face_a_id: int
+    face_b_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FaceConflictsResponse(BaseModel):
+    face_id: int
+    conflicts_with: List[int]

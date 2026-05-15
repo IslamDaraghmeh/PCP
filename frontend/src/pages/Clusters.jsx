@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import ImageModal from '../components/ImageModal';
+import StrictnessToggle from '../components/StrictnessToggle';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '../context/LanguageContext';
-import { clustersAPI, personsAPI } from '../services/api';
-import { Grid, Play, Users, RefreshCw, User } from 'lucide-react';
+import { clustersAPI, personsAPI, facesAPI } from '../services/api';
+import { Grid, Play, Users, RefreshCw, User, UserX } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+
+const STRICTNESS_KEY = 'pcp.clustering.strictness';
 
 const Clusters = () => {
   const [clusters, setClusters] = useState([]);
@@ -16,6 +19,14 @@ const Clusters = () => {
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [modalImage, setModalImage] = useState(null);
   const [currentClusterFaces, setCurrentClusterFaces] = useState([]);
+  const [strictness, setStrictness] = useState(() => {
+    return localStorage.getItem(STRICTNESS_KEY) || 'balanced';
+  });
+
+  const updateStrictness = (val) => {
+    setStrictness(val);
+    localStorage.setItem(STRICTNESS_KEY, val);
+  };
   const { user } = useAuth();
   const { t } = useTranslation();
   const { isRTL } = useLanguage();
@@ -46,7 +57,7 @@ const Clusters = () => {
     setClusteringResult(null);
 
     try {
-      const res = await clustersAPI.runClustering();
+      const res = await clustersAPI.runClustering(strictness);
       setClusteringResult(res.data);
       fetchData();
     } catch (error) {
@@ -82,6 +93,32 @@ const Clusters = () => {
     }
   };
 
+  // Mark the clicked face as "not the same person" as every other face in
+  // this cluster. The next clustering run will refuse to re-merge them.
+  const handleMarkNotSame = async (cluster, face) => {
+    const others = (cluster.faces || []).filter((f) => f.id !== face.id);
+    if (others.length === 0) return;
+
+    const ok = window.confirm(
+      t(
+        'clusters.confirmNotSame',
+        'Mark this face as NOT the same person as the rest of this cluster? Future clustering will keep them apart.'
+      )
+    );
+    if (!ok) return;
+
+    try {
+      await Promise.all(
+        others.map((other) => facesAPI.markNotSame(face.id, other.id))
+      );
+      // Refresh the cluster so the user sees state immediately.
+      const res = await clustersAPI.get(cluster.id);
+      setSelectedCluster(res.data);
+    } catch (error) {
+      console.error('Error marking faces not-same:', error);
+    }
+  };
+
   const getFaceImageUrl = (path) => {
     if (!path) return null;
     const filename = path.split('/').pop().split('\\').pop();
@@ -104,18 +141,25 @@ const Clusters = () => {
             </p>
           </div>
           {canRunClustering && (
-            <button
-              onClick={handleRunClustering}
-              disabled={clustering}
-              className={`flex items-center justify-center ${isRTL ? 'space-x-reverse' : ''} space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 text-sm sm:text-base`}
-            >
-              {clustering ? (
-                <RefreshCw className="w-5 h-5 animate-spin" />
-              ) : (
-                <Play className="w-5 h-5" />
-              )}
-              <span>{clustering ? t('clusters.clustering') : t('clusters.runClustering')}</span>
-            </button>
+            <div className={`flex flex-col sm:flex-row sm:items-end gap-3 ${isRTL ? 'sm:space-x-reverse' : ''} sm:space-x-3`}>
+              <StrictnessToggle
+                value={strictness}
+                onChange={updateStrictness}
+                disabled={clustering}
+              />
+              <button
+                onClick={handleRunClustering}
+                disabled={clustering}
+                className={`flex items-center justify-center ${isRTL ? 'space-x-reverse' : ''} space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 text-sm sm:text-base`}
+              >
+                {clustering ? (
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Play className="w-5 h-5" />
+                )}
+                <span>{clustering ? t('clusters.clustering') : t('clusters.runClustering')}</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -220,21 +264,35 @@ const Clusters = () => {
                   <div className="p-3 sm:p-4 border-t bg-gray-50">
                     <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
                       {selectedCluster.faces.map((face, index) => (
-                        <div
-                          key={face.id}
-                          className="aspect-square rounded-lg overflow-hidden bg-gray-200 cursor-pointer hover:ring-2 hover:ring-blue-500 transition"
-                          onClick={() => openFaceModal(selectedCluster, index)}
-                        >
-                          {face.face_image_path ? (
-                            <img
-                              src={getFaceImageUrl(face.face_image_path)}
-                              alt={`Face ${face.id}`}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
-                              N/A
-                            </div>
+                        <div key={face.id} className="relative group">
+                          <div
+                            className="aspect-square rounded-lg overflow-hidden bg-gray-200 cursor-pointer hover:ring-2 hover:ring-blue-500 transition"
+                            onClick={() => openFaceModal(selectedCluster, index)}
+                          >
+                            {face.face_image_path ? (
+                              <img
+                                src={getFaceImageUrl(face.face_image_path)}
+                                alt={`Face ${face.id}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+                                N/A
+                              </div>
+                            )}
+                          </div>
+                          {selectedCluster.faces.length > 1 && (
+                            <button
+                              type="button"
+                              title={t('clusters.notThisPerson', 'Not this person')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMarkNotSame(selectedCluster, face);
+                              }}
+                              className="absolute top-1 right-1 bg-white/90 hover:bg-red-100 text-red-600 rounded-full p-1 shadow opacity-0 group-hover:opacity-100 transition"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                            </button>
                           )}
                         </div>
                       ))}

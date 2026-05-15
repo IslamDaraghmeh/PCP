@@ -2,13 +2,19 @@ import os
 import shutil
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.config import settings
+from app.core.config import settings, STRICTNESS_PRESETS
+from sqlalchemy import or_
+
 from app.models import Face, Image, Person, User
-from app.schemas import FaceResponse, FaceSearchResult, FaceSearchResponse
+from app.models.face_negative_link import FaceNegativeLink
+from app.schemas import (
+    FaceResponse, FaceSearchResult, FaceSearchResponse,
+    FaceNegativeLinkResponse, FaceConflictsResponse,
+)
 from app.services import face_service, vector_service
 from app.routers.auth import get_current_user
 
@@ -50,13 +56,24 @@ async def search_faces(
     file: UploadFile = File(...),
     limit: int = 20,
     threshold: float = None,
+    strictness: str = Query(
+        "balanced",
+        pattern="^(strict|balanced|loose)$",
+        description="Search strictness preset (ignored if explicit threshold is supplied)",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Search for similar faces by uploading a face image.
     Returns matching faces with similarity scores.
+
+    `strictness` picks a sensible threshold (strict ≈ same person only,
+    loose ≈ look-alikes welcome). An explicit `threshold` overrides it.
     """
+    # Resolve effective threshold: explicit > preset.
+    if threshold is None:
+        threshold = STRICTNESS_PRESETS[strictness]["similarity_threshold"]
 
     # Validate file
     ext = os.path.splitext(file.filename)[1].lower()
@@ -187,3 +204,100 @@ def unassign_face_from_person(
     db.commit()
 
     return {"message": "Face unassigned from person"}
+
+
+# --- Negative links: "these two faces are NOT the same person" -------------
+
+
+def _ensure_face(db: Session, face_id: int) -> Face:
+    face = db.query(Face).filter(Face.id == face_id).first()
+    if not face:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Face {face_id} not found",
+        )
+    return face
+
+
+@router.post("/{face_a}/not-same-as/{face_b}", response_model=FaceNegativeLinkResponse)
+def mark_faces_not_same(
+    face_a: int,
+    face_b: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Assert that two faces do NOT belong to the same person.
+
+    Clustering will refuse to merge these two faces — or any cluster
+    containing them — on every future run.
+    """
+    if face_a == face_b:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A face cannot be marked different from itself",
+        )
+
+    _ensure_face(db, face_a)
+    _ensure_face(db, face_b)
+
+    a, b = FaceNegativeLink.canonical_pair(face_a, face_b)
+
+    existing = (
+        db.query(FaceNegativeLink)
+        .filter(FaceNegativeLink.face_a_id == a, FaceNegativeLink.face_b_id == b)
+        .first()
+    )
+    if existing:
+        return existing
+
+    link = FaceNegativeLink(face_a_id=a, face_b_id=b, created_by=current_user.id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+@router.delete("/{face_a}/not-same-as/{face_b}")
+def remove_faces_not_same(
+    face_a: int,
+    face_b: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove a previously-asserted negative link between two faces."""
+    a, b = FaceNegativeLink.canonical_pair(face_a, face_b)
+    deleted = (
+        db.query(FaceNegativeLink)
+        .filter(FaceNegativeLink.face_a_id == a, FaceNegativeLink.face_b_id == b)
+        .delete()
+    )
+    db.commit()
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No negative link between those faces",
+        )
+    return {"message": "Negative link removed"}
+
+
+@router.get("/{face_id}/conflicts", response_model=FaceConflictsResponse)
+def list_face_conflicts(
+    face_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all face IDs explicitly marked as 'not the same person' as `face_id`."""
+    _ensure_face(db, face_id)
+    rows = (
+        db.query(FaceNegativeLink)
+        .filter(
+            or_(
+                FaceNegativeLink.face_a_id == face_id,
+                FaceNegativeLink.face_b_id == face_id,
+            )
+        )
+        .all()
+    )
+    others = [r.face_b_id if r.face_a_id == face_id else r.face_a_id for r in rows]
+    return FaceConflictsResponse(face_id=face_id, conflicts_with=others)

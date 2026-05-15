@@ -67,10 +67,10 @@ export const imagesAPI = {
 export const facesAPI = {
   list: (skip = 0, limit = 100) => api.get(`/faces/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/faces/${id}`),
-  search: (file, limit = 20, threshold = null) => {
+  search: (file, limit = 20, threshold = null, strictness = 'balanced') => {
     const formData = new FormData();
     formData.append('file', file);
-    let url = `/faces/search?limit=${limit}`;
+    let url = `/faces/search?limit=${limit}&strictness=${strictness}`;
     if (threshold) url += `&threshold=${threshold}`;
     return api.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -79,6 +79,9 @@ export const facesAPI = {
   assignPerson: (faceId, personId) =>
     api.put(`/faces/${faceId}/assign-person?person_id=${personId}`),
   unassignPerson: (faceId) => api.delete(`/faces/${faceId}/assign-person`),
+  markNotSame: (faceA, faceB) => api.post(`/faces/${faceA}/not-same-as/${faceB}`),
+  unmarkNotSame: (faceA, faceB) => api.delete(`/faces/${faceA}/not-same-as/${faceB}`),
+  listConflicts: (faceId) => api.get(`/faces/${faceId}/conflicts`),
 };
 
 // Persons API
@@ -92,7 +95,8 @@ export const personsAPI = {
 
 // Clusters API
 export const clustersAPI = {
-  runClustering: () => api.post('/clusters/run'),
+  runClustering: (strictness = 'balanced') =>
+    api.post(`/clusters/run?strictness=${strictness}`),
   list: (skip = 0, limit = 100) => api.get(`/clusters/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/clusters/${id}`),
   update: (id, data) => api.put(`/clusters/${id}`, data),

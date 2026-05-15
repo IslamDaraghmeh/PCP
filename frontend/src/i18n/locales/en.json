@@ -166,7 +166,18 @@
     "clusterSize": "Cluster Size",
     "unassigned": "Unassigned",
     "assignSuccess": "Cluster assigned successfully",
-    "clusteringComplete": "Clustering complete"
+    "clusteringComplete": "Clustering complete",
+    "notThisPerson": "Not this person",
+    "confirmNotSame": "Mark this face as NOT the same person as the rest of this cluster? Future clustering will keep them apart."
+  },
+  "strictness": {
+    "label": "Strictness",
+    "strict": "Strict",
+    "balanced": "Balanced",
+    "loose": "Loose",
+    "strict_hint": "Tighter matches — fewer but more reliable",
+    "balanced_hint": "Recommended default",
+    "loose_hint": "Includes look-alikes — more results, more noise"
   },
   "search": {
     "title": "Face Search",
