@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List, Dict, Tuple
-from sklearn.cluster import DBSCAN
+import hdbscan
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -45,20 +45,25 @@ class ClusteringService:
         norms[norms == 0] = 1
         embeddings_normalized = embeddings / norms
 
-        # Run DBSCAN with cosine distance (using precomputed distance matrix)
-        # Convert to distance (1 - similarity)
+        # Build cosine distance matrix from normalized embeddings.
+        # HDBSCAN with a precomputed distance matrix requires float64.
         similarity_matrix = np.dot(embeddings_normalized, embeddings_normalized.T)
         distance_matrix = 1 - similarity_matrix
-        # Clip to ensure non-negative values (floating-point precision can cause small negatives)
-        distance_matrix = np.clip(distance_matrix, 0, 2)
+        distance_matrix = np.clip(distance_matrix, 0, 2).astype(np.float64)
 
-        clustering = DBSCAN(
-            eps=self.eps,
-            min_samples=self.min_samples,
-            metric='precomputed'
-        ).fit(distance_matrix)
-
-        labels = clustering.labels_
+        # HDBSCAN auto-adapts density per cluster — better than DBSCAN's single
+        # global eps when different people have different intra-class spread.
+        # cluster_selection_epsilon enforces a minimum cosine-distance gap so
+        # clearly-similar faces (e.g. near-duplicates) always merge.
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=2,
+            min_samples=1,
+            metric='precomputed',
+            cluster_selection_method='leaf',
+            cluster_selection_epsilon=self.eps,
+            allow_single_cluster=False,
+        )
+        labels = clusterer.fit_predict(distance_matrix)
 
         # Snapshot current face → person mapping so we can restore person_id
         # on the new clusters when re-clustering (face.person_id is preserved;
