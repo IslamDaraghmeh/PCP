@@ -3,10 +3,10 @@ import uuid
 import numpy as np
 from typing import List, Tuple, Optional
 from PIL import Image as PILImage
-from deepface import DeepFace
 import pickle
 
 from app.core.config import settings
+from app.services.embedding_pipeline import embedding_pipeline
 
 
 class FaceService:
@@ -24,56 +24,42 @@ class FaceService:
     def detect_faces(self, image_path: str) -> List[dict]:
         """
         Detect all faces in an image and return their bounding boxes and embeddings.
+        Delegates the actual model work to the configured EmbeddingPipeline so
+        ensemble / TTA changes are pure config flips.
         """
-        try:
-            # align=True is DeepFace's default but we set it explicitly: alignment
-            # rotates the crop so eyes are horizontal, which materially improves
-            # Facenet512 embedding quality (≈3-5pp on LFW in practice).
-            face_objs = DeepFace.represent(
-                img_path=image_path,
-                model_name=self.model_name,
-                detector_backend=self.detector_backend,
-                enforce_detection=False,
-                align=True,
-            )
+        detected = embedding_pipeline.detect_and_embed(image_path)
 
-            faces = []
-            for i, face_obj in enumerate(face_objs):
-                facial_area = face_obj.get("facial_area", {})
-                embedding = face_obj.get("embedding", [])
-                confidence = float(face_obj.get("face_confidence", 0.0))
-                w = facial_area.get("w", 0)
-                h = facial_area.get("h", 0)
+        faces: List[dict] = []
+        for i, det in enumerate(detected):
+            facial_area = det.get("facial_area") or {}
+            embedding = det.get("embedding")
+            confidence = float(det.get("confidence", 0.0))
+            w = facial_area.get("w", 0)
+            h = facial_area.get("h", 0)
 
-                if not embedding:
-                    continue
+            if embedding is None:
+                continue
 
-                # Drop low-quality detections — these otherwise become noise in
-                # the FAISS index and degrade every future search.
-                if w < self.MIN_FACE_SIZE_PX or h < self.MIN_FACE_SIZE_PX:
-                    continue
-                if confidence and confidence < self.MIN_FACE_CONFIDENCE:
-                    continue
+            # Drop low-quality detections — these otherwise become noise in
+            # the FAISS index and degrade every future search.
+            if w < self.MIN_FACE_SIZE_PX or h < self.MIN_FACE_SIZE_PX:
+                continue
+            if confidence and confidence < self.MIN_FACE_CONFIDENCE:
+                continue
 
-                # Save cropped face image
-                face_image_path = self._save_face_crop(
-                    image_path, facial_area, i
-                )
+            face_image_path = self._save_face_crop(image_path, facial_area, i)
 
-                faces.append({
-                    "bbox_x": facial_area.get("x", 0),
-                    "bbox_y": facial_area.get("y", 0),
-                    "bbox_width": w,
-                    "bbox_height": h,
-                    "embedding": np.array(embedding, dtype=np.float32),
-                    "confidence": confidence,
-                    "face_image_path": face_image_path
-                })
+            faces.append({
+                "bbox_x": facial_area.get("x", 0),
+                "bbox_y": facial_area.get("y", 0),
+                "bbox_width": w,
+                "bbox_height": h,
+                "embedding": embedding,
+                "confidence": confidence,
+                "face_image_path": face_image_path,
+            })
 
-            return faces
-        except Exception as e:
-            print(f"Error detecting faces: {e}")
-            return []
+        return faces
 
     def _save_face_crop(self, image_path: str, facial_area: dict, index: int) -> str:
         """Save cropped face from the image."""
@@ -125,49 +111,23 @@ class FaceService:
 
         Returns the face with the highest score = area * confidence — the
         largest, sharpest face — instead of just the first one DeepFace happens
-        to emit. The "first face" heuristic was wrong whenever the subject
-        wasn't the leftmost person in the frame.
+        to emit.
         """
-        # Try with enforce_detection=True first. If retinaface finds nothing,
-        # fall back to enforce_detection=False so DeepFace can still try; we
-        # then validate with a confidence check and reject obvious non-faces.
-        try:
-            face_objs = DeepFace.represent(
-                img_path=image_path,
-                model_name=self.model_name,
-                detector_backend=self.detector_backend,
-                enforce_detection=True,
-                align=True,
-            )
-        except Exception:
-            try:
-                face_objs = DeepFace.represent(
-                    img_path=image_path,
-                    model_name=self.model_name,
-                    detector_backend=self.detector_backend,
-                    enforce_detection=False,
-                    align=True,
-                )
-            except Exception as e:
-                print(f"Error getting embedding: {e}")
-                return None
-
-        if not face_objs:
+        detected = embedding_pipeline.detect_and_embed(image_path)
+        if not detected:
             return None
 
         candidates = []
-        for face_obj in face_objs:
-            embedding = face_obj.get("embedding")
-            if not embedding:
+        for det in detected:
+            area = det.get("facial_area") or {}
+            embedding = det.get("embedding")
+            if embedding is None:
                 continue
-            area = face_obj.get("facial_area", {})
             w = area.get("w", 0)
             h = area.get("h", 0)
-            confidence = float(face_obj.get("face_confidence", 0.0))
+            confidence = float(det.get("confidence", 0.0))
 
-            # Reject crops that are too small or clearly not a face — protects
-            # the enforce_detection=False fallback from returning the whole
-            # image as a phantom "face".
+            # Reject crops too small or clearly not a face.
             if w < self.MIN_FACE_SIZE_PX or h < self.MIN_FACE_SIZE_PX:
                 continue
             if confidence and confidence < self.MIN_FACE_CONFIDENCE:
@@ -175,7 +135,7 @@ class FaceService:
 
             score = (w * h) * max(confidence, 0.01)
             candidates.append({
-                "embedding": np.array(embedding, dtype=np.float32),
+                "embedding": embedding,
                 "confidence": confidence,
                 "area": area,
                 "score": score,

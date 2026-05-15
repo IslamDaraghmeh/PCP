@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 import pickle
 
 from app.core.config import settings
+from app.services.embedding_pipeline import embedding_pipeline
 
 
 class VectorService:
@@ -15,7 +16,11 @@ class VectorService:
         self.id_map_path = os.path.join(
             os.path.dirname(settings.UPLOAD_DIR), "data", "id_map.pkl"
         )
-        self.dimension = 512  # Facenet512 produces 512-dimensional embeddings
+        # Dimension is dictated by the configured embedding pipeline. After
+        # swapping EMBEDDING_MODELS / USE_TTA the on-disk index will have the
+        # wrong dimension; we detect that on load and start fresh so the new
+        # vectors can be added (the reembed script repopulates).
+        self.dimension = embedding_pipeline.dimension
         self.index = None
         self.id_map = []  # Maps FAISS index positions to database face IDs
         self._load_or_create_index()
@@ -24,7 +29,16 @@ class VectorService:
         """Load existing index or create a new one."""
         if os.path.exists(self.index_path) and os.path.exists(self.id_map_path):
             try:
-                self.index = faiss.read_index(self.index_path)
+                loaded = faiss.read_index(self.index_path)
+                if loaded.d != self.dimension:
+                    print(
+                        f"[vector_service] index dimension {loaded.d} != pipeline "
+                        f"dimension {self.dimension}; discarding stale index. "
+                        f"Run scripts/reembed.py to rebuild."
+                    )
+                    self._create_new_index()
+                    return
+                self.index = loaded
                 with open(self.id_map_path, 'rb') as f:
                     self.id_map = pickle.load(f)
             except Exception as e:

@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     # Face Recognition settings
     FACE_MODEL: str = "Facenet512"
     DETECTOR_BACKEND: str = "retinaface"
+
+    # Embedding pipeline — list of DeepFace model names; the pipeline
+    # concatenates per-model embeddings into a single vector. USE_TTA also
+    # averages each model with its horizontal-flip embedding. After changing
+    # either of these, run `python -m scripts.reembed` and the FAISS index
+    # will be rebuilt with the new dimension.
+    # Facenet512 + ArcFace ensemble (1024-d concat) with TTA (horizontal flip
+    # average per model). Typical +2-4pp accuracy lift vs Facenet512 alone.
+    # After changing this, run scripts/reembed.py on the server.
+    EMBEDDING_MODELS: List[str] = ["Facenet512", "ArcFace"]
+    USE_TTA: bool = True
     # Facenet512 cosine-distance threshold for "same person" is ~0.30
     # (cosine similarity > 0.70). Looser values merge different people.
     SIMILARITY_THRESHOLD: float = 0.70
